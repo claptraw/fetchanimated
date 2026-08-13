@@ -1,8 +1,10 @@
 # Add fetchanimated to your existing beets plugin list, for example:
 plugins: fetchart embedart fetchanimated
 #
-# If you install the single Python file manually instead of as a package,
-# also configure pluginpath to the directory containing fetchanimated.py.
+# Required for the recommended manual installation. Use the path that is
+# valid inside the environment where beets runs.
+pluginpath:
+  - /path/to/beets-config/beetsplug
 
 fetchanimated:
   # Fetch animated artwork automatically for album imports accepted by beets.
