@@ -25,34 +25,75 @@ It is deliberately independent from beets' static cover-art state: it does **not
 - An FFmpeg build with the `libwebp` encoder when WebP output is enabled
 - Network access to the configured artwork resolver and the HLS URLs it returns
 
-Check FFmpeg with:
+## Installing FFmpeg
+
+FFmpeg is installed separately from this plugin.
+
+### Windows
+
+Using Windows Package Manager (`winget`):
+
+```powershell
+winget install --id Gyan.FFmpeg --exact
+```
+
+Open a new terminal after installation and verify it:
+
+```powershell
+ffmpeg -version
+ffmpeg -hide_banner -encoders | findstr libwebp
+```
+
+### macOS
+
+Using [Homebrew](https://brew.sh/):
+
+```bash
+brew install ffmpeg
+```
+
+Then verify it:
 
 ```bash
 ffmpeg -version
 ffmpeg -hide_banner -encoders | grep libwebp
 ```
 
-On Windows, use `findstr libwebp` instead of `grep`.
+### Debian / Ubuntu
+
+```bash
+sudo apt update
+sudo apt install ffmpeg
+```
+
+Then verify it:
+
+```bash
+ffmpeg -version
+ffmpeg -hide_banner -encoders | grep libwebp
+```
+
+If `libwebp` is not listed, install an FFmpeg build that includes the `libwebp` encoder or disable the WebP outputs and use MP4 output only.
 
 ## Installation
 
-beets supports external plugins either by installing them into the same Python environment as beets or by placing a plugin file in a configured `pluginpath`.
+The plugin must be installed into the same Python environment as beets. After installation, add `fetchanimated` to the `plugins` list in your beets configuration.
 
-### Option A: install the package
+### Option A: install the release wheel (recommended)
 
-Clone/download the repository, then install it into the Python environment that runs `beet`:
-
-```bash
-python -m pip install .
-```
-
-If beets itself is managed with `pipx`, inject the plugin into that environment:
+Download the `.whl` file from the matching GitHub Release and install it:
 
 ```bash
-pipx inject beets .
+python -m pip install ./beets_fetchanimated-0.1-py3-none-any.whl
 ```
 
-Then add `fetchanimated` to the existing beets plugin list:
+If beets is managed with `pipx`, inject the wheel into the existing beets environment instead:
+
+```bash
+pipx inject beets ./beets_fetchanimated-0.1-py3-none-any.whl
+```
+
+Then enable the plugin in your beets configuration:
 
 ```yaml
 plugins: fetchart embedart fetchanimated
@@ -60,7 +101,29 @@ plugins: fetchart embedart fetchanimated
 
 `fetchart` and `embedart` are optional; they are shown only as a common setup.
 
-### Option B: manual plugin file
+Verify that beets can load the plugin:
+
+```bash
+beet help fetchanimated
+```
+
+### Option B: install from a source checkout
+
+From the repository root:
+
+```bash
+python -m pip install .
+```
+
+Or, when beets is managed with `pipx`:
+
+```bash
+pipx inject beets .
+```
+
+Then add `fetchanimated` to the beets plugin list as shown above.
+
+### Option C: manual single-file installation
 
 Copy:
 
@@ -76,6 +139,8 @@ pluginpath:
 
 plugins: fetchanimated
 ```
+
+If you use the versioned standalone file from a GitHub Release, rename `fetchanimated-0.1.py` to `fetchanimated.py` before placing it in `pluginpath`.
 
 ## Configuration
 
@@ -303,10 +368,24 @@ python -m build
 
 The test suite is intentionally network-free. It checks core HLS parsing/selection, configuration behavior, package version consistency, and guards against reintroducing machine-specific or private configuration into the public source tree.
 
+## Credits
+
+Animated-artwork discovery is powered by the public [m8tec Apple Music Animated Artworks](https://github.com/m8tec/apple-music-animated-artworks) resolver at [`artwork.m8tec.top`](https://artwork.m8tec.top/). Thanks to m8tec for making the resolver available and documenting the Apple Music animated-artwork workflow.
+
+This project is independent from m8tec and is not affiliated with or endorsed by m8tec.
+
+## Development disclosure
+
+AI-assisted tools were used during development and documentation. All AI-generated or AI-suggested changes included in releases were reviewed and tested by the maintainer. Responsibility for the released code remains with the maintainer.
+
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE). The MIT License applies to this project's software only; it does not grant rights to third-party artwork, trademarks, services, or other content.
 
-## Disclaimer
+## Legal and third-party services
 
-This project is not affiliated with Apple, Apple Music, beets, or the external artwork resolver. Users are responsible for complying with the terms and laws applicable to the services and media they access.
+This is an independent, unofficial project and is not affiliated with or endorsed by Apple, Apple Music, beets, or m8tec.
+
+The plugin uses the third-party m8tec resolver and accesses media URLs returned by that service. Those external services and the artwork they expose are not part of this project and may be subject to their own terms, copyright, access restrictions, rate limits, and availability.
+
+Apple's Media Services Terms contain restrictions on automated scraping or extraction of service content and on circumventing security technologies. Users are responsible for reviewing and complying with the terms and laws applicable to their use and jurisdiction. Nothing in this repository grants rights to Apple Music content. This project is not intended to circumvent DRM, authentication, or other access controls.
