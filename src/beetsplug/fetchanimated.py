@@ -439,7 +439,7 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
             url,
             headers={
                 "User-Agent": self.config["user_agent"].get(str).strip()
-                or f"beets-fetchanimated/{PLUGIN_VERSION}"
+                or f"fetchanimated/{PLUGIN_VERSION}"
             },
         )
         try:
@@ -539,7 +539,7 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
             url,
             headers={
                 "User-Agent": self.config["user_agent"].get(str).strip()
-                or f"beets-fetchanimated/{PLUGIN_VERSION}"
+                or f"fetchanimated/{PLUGIN_VERSION}"
             },
         )
         try:
@@ -746,7 +746,7 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
         return True
 
     def _temp_path(self, suffix: str) -> str:
-        fd, path = tempfile.mkstemp(prefix="beets-fetchanimated-", suffix=suffix)
+        fd, path = tempfile.mkstemp(prefix="fetchanimated-", suffix=suffix)
         os.close(fd)
         self._safe_unlink(path)
         return path
