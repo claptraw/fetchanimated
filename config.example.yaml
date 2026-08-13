@@ -1,0 +1,84 @@
+# Add fetchanimated to your existing beets plugin list, for example:
+plugins: fetchart embedart fetchanimated
+#
+# If you install the single Python file manually instead of as a package,
+# also configure pluginpath to the directory containing fetchanimated.py.
+
+fetchanimated:
+  # Fetch animated artwork automatically for album imports accepted by beets.
+  auto: yes
+
+  # Also fetch when an album is imported "as-is" without autotagging changes.
+  fetch_for_asis: no
+
+  # Public artwork resolver used by the plugin.
+  api_url: https://artwork.m8tec.top
+
+  # Output formats. Default: only the square Animated WebP.
+  # Optional formats can be enabled individually or in combination.
+  # A later library run only creates enabled files that are still missing
+  # while overwrite remains disabled. 
+  save_square_webp: yes
+  save_square_mp4: no
+  save_tall_mp4: no
+  save_tall_webp: no
+
+  # Output filenames written next to the album's audio files.
+  square_webp_filename: cover.webp
+  square_mp4_filename: cover.mp4
+  tall_mp4_filename: cover-tall.mp4
+  tall_webp_filename: cover-tall.webp
+
+  # HLS stream selection. These are TARGET widths, not mandatory output dimensions.
+  # fetchanimated reads the master manifest for every album and
+  # selects the actually available stream whose width is closest to the target.
+  # The chosen stream is NOT resized again afterwards.
+  #
+  # Observed Square range (informational only):
+  #   min: 360x360
+  #   max: 2160x2160
+  #
+  # Observed Tall range (informational only):
+  #   min: 310x414
+  #   max: 2048x2732
+  #
+  # Available resolutions can differ between artworks. Therefore values such
+  # as 768 or 830 remain valid even when that exact width is not offered.
+  square_target_width: 768
+  tall_target_width: 830
+  # nearest = closest available width; on an exact tie use the larger one.
+  # Optional alternatives already supported: at_most, at_least, highest.
+  resolution_policy: nearest
+
+  # Animated WebP encoding quality (0-100).
+  webp_quality: 80
+
+  # ffmpeg must be installed separately and available on PATH.
+  # You can also set an absolute executable path here.
+  ffmpeg: ffmpeg
+
+  # Network and subprocess limits.
+  api_timeout: 60
+  api_request_delay_seconds: 3.0
+  api_error_backoff_seconds: 30.0
+  manifest_timeout: 20
+  ffmpeg_timeout: 600
+
+  # Existing sidecars are preserved by default.
+  overwrite: no
+
+  # Move known animated sidecars when beets later moves the album.
+  move_with_album: yes
+
+  # Small delay between albums during batch commands.
+  batch_delay_seconds: 0.25
+
+  # Optional reports. Empty disables report-file output.
+  # Example: ~/.config/beets/fetchanimated-full-library.log
+  full_library_log: ""
+  # Example: ~/.config/beets/fetchanimated-limit.log
+  limit_log: ""
+
+  # Prevent fetchart's filesystem source from treating the configured animated
+  # WebP sidecars as static album-cover candidates.
+  protect_fetchart_filesystem: yes
