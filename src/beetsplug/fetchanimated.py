@@ -1,6 +1,6 @@
 """Fetch Apple Music animated album artwork for beets.
 
-fetchanimated v0.1 is a standalone beets plugin intentionally isolated from static album artwork:
+fetchanimated v0.1.1 is a standalone beets plugin intentionally isolated from static album artwork:
 
 * It never requires or modifies ``cover.jpg``, ``album.artpath`` or embedded
   artwork.
@@ -18,10 +18,10 @@ fetchanimated v0.1 is a standalone beets plugin intentionally isolated from stat
 * A standalone ``beet fetchanimated`` command supports queries, dry runs,
   limited batches and full-library backfills.
 
-Because beets FetchArt accepts WebP files from its filesystem source and local
+Because beets fetchart accepts WebP files from its filesystem source and local
 files named ``cover.*`` can become static artwork candidates, this plugin
-narrowly excludes its configured animated WebP sidecars from that FetchArt
-filesystem source. The existing static cover.jpg/EmbedArt workflow remains
+narrowly excludes its configured animated WebP sidecars from that fetchart
+filesystem source. The existing static cover.jpg/embedart workflow remains
 independent and unchanged.
 """
 
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from beets.library import Album, Library
 
 
-PLUGIN_VERSION = "0.1"
+PLUGIN_VERSION = "0.1.1"
 
 
 @dataclass(frozen=True)
@@ -275,7 +275,7 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
         return [spec for spec in self._all_specs() if self.config[spec.key].get(bool)]
 
     # ------------------------------------------------------------------
-    # Keep static FetchArt independent from animated WebP sidecars
+    # Keep static fetchart independent from animated WebP sidecars
     # ------------------------------------------------------------------
 
     def _motion_webp_names(self) -> set[str]:
@@ -285,7 +285,7 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
         }
 
     def _protect_fetchart_filesystem(self) -> None:
-        """Exclude only fetchanimated WebPs from FetchArt filesystem input."""
+        """Exclude only fetchanimated WebPs from fetchart filesystem input."""
         if self._fetchart_protected:
             return
         if not self.config["protect_fetchart_filesystem"].get(bool):
@@ -337,7 +337,7 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
                         if basename in _motion_names:
                             self._log.debug(
                                 "fetchanimated: excluding animated sidecar {} "
-                                "from FetchArt filesystem candidates",
+                                "from fetchart filesystem candidates",
                                 basename,
                             )
                             continue
