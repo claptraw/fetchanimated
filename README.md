@@ -1,364 +1,446 @@
 # fetchanimated
 
-`fetchanimated` is a standalone [beets](https://beets.io/) plugin that downloads Apple Music motion artwork and stores it as animated sidecar files next to an album.
+`fetchanimated` is a [beets](https://beets.io/) plugin for downloading Apple Music animated album artwork directly into the matching album folders in your existing music library.
 
-It is deliberately independent from beets' static cover-art state: it does **not** require or modify `cover.jpg`, `album.artpath`, or embedded artwork.
+It uses the public m8tec artwork API to resolve Apple Music animated artwork and can save square and tall artwork as animated WebP and/or MP4 files.
 
 ## Features
 
-- Fetches square and tall Apple Music motion artwork through the public m8tec artwork resolver.
-- Reads Apple HLS master manifests and automatically selects an actually available stream resolution.
-- Supports `nearest`, `at_most`, `at_least`, and `highest` resolution policies.
-- Remuxes the selected HLS video stream losslessly to MP4 when MP4 output is enabled.
-- Encodes animated WebP with FFmpeg/libwebp while preserving the selected stream's native frame cadence.
-- Never overwrites an existing sidecar unless `overwrite: yes` or `--force` is used.
-- Integrates with normal beets album imports through standard import-pipeline hooks.
-- Provides a `beet fetchanimated` command for queries, dry runs, limited batches, and full-library backfills.
-- Can move known motion-art sidecars along with albums during later `beet move` operations.
-- Optionally protects beets FetchArt from considering animated `cover*.webp` sidecars as static cover candidates.
+* Manual or automatic download of Apple Music animated artwork through the public m8tec API.
+* Supports both **square** and **tall** artwork variants.
+* Saves artwork as **animated WebP**, **MP4**, or any combination of both formats and variants.
+* Freely configurable target resolution and WebP quality.
+* Automatically checks which artwork resolutions are actually available and selects the exact or nearest matching source resolution.
+* Lossless MP4 output is possible because the selected Apple HLS video stream is remuxed without video re-encoding. WebP output is encoded at the configured quality.
+* Currently observed artwork variants reach up to **2160×2160** for square artwork and **2048×2732** for tall artwork. Actual availability depends on the album; `fetchanimated` never upscales a lower-resolution source.
+* Search individual albums by album title, artist + album title, all albums by an artist, or process the complete beets library.
+* Automatically fetch artwork for newly imported albums when `auto: yes` is enabled.
+* Saves artwork directly into the album directory. The default square WebP filename is `cover.webp`, which works well with Navidrome and clients that support animated artwork such as Narjo.
+* Existing artwork files are preserved unless overwriting is explicitly requested.
+* Dry-run mode lets you check matches and available resolutions before anything is written.
+* When beets moves an album, `fetchanimated` can move the corresponding animated artwork files with it.
+* Works alongside beets FetchArt without replacing or modifying your normal static album cover.
 
-## Requirements
+## Important: beets library database
 
-- Python 3.10+
-- beets 2.x
-- FFmpeg available on `PATH` (or configured with an explicit executable path)
-- An FFmpeg build with the `libwebp` encoder when WebP output is enabled
-- Network access to the configured artwork resolver and the HLS URLs it returns
+`fetchanimated` works from the **beets library database**. It does not scan arbitrary music folders to discover albums.
 
-## Installing FFmpeg
+The albums you want to process therefore need to exist in your beets database, and the paths stored by beets should still point to the actual album directories on disk. This is especially important if files or folders have been moved manually outside beets.
 
-FFmpeg is installed separately from this plugin.
+## Installation
 
-### Windows
+### 1. Install the plugin file — recommended
 
-Using Windows Package Manager (`winget`):
+Locate the directory that contains your existing beets `config.yaml` and create a `beetsplug` directory next to it:
 
-```powershell
-winget install --id Gyan.FFmpeg --exact
+```text
+beets-config/
+├── config.yaml
+└── beetsplug/
+    └── fetchanimated.py
 ```
 
-Open a new terminal after installation and verify it:
+Copy `src/beetsplug/fetchanimated.py` from this repository into that directory.
 
-```powershell
-ffmpeg -version
-ffmpeg -hide_banner -encoders | findstr libwebp
+Then point beets to the directory containing the plugin. Use the path that is valid **inside the environment where beets runs**:
+
+```yaml
+pluginpath:
+  - /path/to/beets-config/beetsplug
 ```
 
-### macOS
+If you already have a `pluginpath`, add the new directory to the existing list instead of replacing it.
 
-Using [Homebrew](https://brew.sh/):
+Next, add `fetchanimated` to your existing `plugins` line. For example:
 
-```bash
-brew install ffmpeg
+```yaml
+plugins: fetchart embedart fetchanimated
 ```
 
-Then verify it:
+Do not remove your existing plugins; just add `fetchanimated`.
 
-```bash
-ffmpeg -version
-ffmpeg -hide_banner -encoders | grep libwebp
-```
+Finally, copy the complete `fetchanimated:` configuration from [`config.example.yaml`](config.example.yaml) into your `config.yaml`. The full configuration is also shown below.
 
-### Debian / Ubuntu
+### 2. Install FFmpeg
+
+FFmpeg is required for downloading/remuxing the animated video and for creating animated WebP files.
+
+#### Debian / Ubuntu
 
 ```bash
 sudo apt update
 sudo apt install ffmpeg
 ```
 
-Then verify it:
+#### macOS with Homebrew
+
+```bash
+brew install ffmpeg
+```
+
+#### Windows with WinGet
+
+```powershell
+winget install --id Gyan.FFmpeg -e
+```
+
+If beets runs inside Docker or another container, FFmpeg must also be available **inside that container/environment**. Installing FFmpeg only on the host is not sufficient.
+
+Verify the installation:
 
 ```bash
 ffmpeg -version
+```
+
+For WebP output, also verify that the FFmpeg build includes `libwebp`:
+
+Linux/macOS:
+
+```bash
 ffmpeg -hide_banner -encoders | grep libwebp
 ```
 
-If `libwebp` is not listed, install an FFmpeg build that includes the `libwebp` encoder or disable the WebP outputs and use MP4 output only.
+Windows:
 
-## Installation
+```powershell
+ffmpeg -hide_banner -encoders | findstr libwebp
+```
 
-The plugin must be installed into the same Python environment as beets. After installation, add `fetchanimated` to the `plugins` list in your beets configuration.
+### 3. Verify that beets loads fetchanimated
 
-### Option A: install the release wheel (recommended)
+If beets is running as a long-lived container or service, restart that container/service after adding the plugin. A normal command-line beets installation loads plugins when `beet` starts, so no separate restart is usually required.
 
-Download the `.whl` file from the matching GitHub Release and install it:
+Then run:
 
 ```bash
-python -m pip install ./beets_fetchanimated-0.1-py3-none-any.whl
+beet version
 ```
 
-If beets is managed with `pipx`, inject the wheel into the existing beets environment instead:
-
-```bash
-pipx inject beets ./beets_fetchanimated-0.1-py3-none-any.whl
-```
-
-Then enable the plugin in your beets configuration:
-
-```yaml
-plugins: fetchart embedart fetchanimated
-```
-
-`fetchart` and `embedart` are optional; they are shown only as a common setup.
-
-Verify that beets can load the plugin:
-
-```bash
-beet help fetchanimated
-```
-
-### Option B: install from a source checkout
-
-From the repository root:
-
-```bash
-python -m pip install .
-```
-
-Or, when beets is managed with `pipx`:
-
-```bash
-pipx inject beets .
-```
-
-Then add `fetchanimated` to the beets plugin list as shown above.
-
-### Option C: manual single-file installation
-
-Copy:
-
-```text
-src/beetsplug/fetchanimated.py
-```
-
-into a directory of your choice, for example `~/beets-plugins/`, and configure beets:
-
-```yaml
-pluginpath:
-  - ~/beets-plugins
-
-plugins: fetchanimated
-```
-
-If you use the versioned standalone file from a GitHub Release, rename `fetchanimated-0.1.py` to `fetchanimated.py` before placing it in `pluginpath`.
+`fetchanimated` should appear in the list of loaded plugins.
 
 ## Configuration
 
-Start with [`config.example.yaml`](config.example.yaml). A minimal configuration is:
+Add `fetchanimated` to your existing plugin list and configure the plugin with the complete block below.
 
 ```yaml
-plugins: fetchanimated
+plugins: fetchart embedart fetchanimated
+
+pluginpath:
+  - /path/to/beets-config/beetsplug
 
 fetchanimated:
   auto: yes
-  save_square_webp: yes
-  ffmpeg: ffmpeg
-```
+  fetch_for_asis: no
 
-The default output is `cover.webp` in each album directory.
+  api_url: https://artwork.m8tec.top
 
-### Output formats
-
-Each output can be enabled independently:
-
-```yaml
-fetchanimated:
   save_square_webp: yes
   save_square_mp4: no
   save_tall_mp4: no
   save_tall_webp: no
-```
 
-Default filenames:
+  square_webp_filename: cover.webp
+  square_mp4_filename: cover.mp4
+  tall_mp4_filename: cover-tall.mp4
+  tall_webp_filename: cover-tall.webp
 
-| Variant | Format | Filename |
-|---|---|---|
-| square | WebP | `cover.webp` |
-| square | MP4 | `cover.mp4` |
-| tall | MP4 | `cover-tall.mp4` |
-| tall | WebP | `cover-tall.webp` |
-
-Filenames must be plain filenames, not paths. Invalid values fall back to the built-in safe defaults.
-
-### Resolution selection
-
-```yaml
-fetchanimated:
   square_target_width: 768
   tall_target_width: 830
   resolution_policy: nearest
-```
 
-Policies:
+  webp_quality: 80
+  ffmpeg: ffmpeg
 
-- `nearest`: choose the available width closest to the target; ties prefer the larger stream.
-- `at_most`: prefer the largest available stream not wider than the target; otherwise fall back to `nearest`.
-- `at_least`: prefer the smallest available stream at least as wide as the target; otherwise fall back to `nearest`.
-- `highest`: always choose the highest-resolution stream advertised by the HLS master.
+  api_timeout: 60
+  api_request_delay_seconds: 3.0
+  api_error_backoff_seconds: 30.0
+  manifest_timeout: 20
+  ffmpeg_timeout: 600
 
-The plugin selects from the resolutions Apple actually advertises in the HLS master; it does not upscale the video spatially.
-
-### Existing files
-
-Existing sidecars are preserved by default:
-
-```yaml
-fetchanimated:
   overwrite: no
-```
+  move_with_album: yes
+  batch_delay_seconds: 0.25
 
-Set `overwrite: yes` to replace enabled outputs automatically, or use `--force` for one manual command.
-
-### Optional report files
-
-Report-file output is disabled by default so the plugin has no machine-specific path assumptions:
-
-```yaml
-fetchanimated:
   full_library_log: ""
   limit_log: ""
+
+  protect_fetchart_filesystem: yes
 ```
 
-Set either option to any writable path if persistent batch reports are desired.
+## Output formats
 
-## Automatic imports
+All four output types can be enabled independently or together:
 
-With `auto: yes`, the plugin participates only in album imports. It prepares motion artwork during the import pipeline and places the prepared files after beets finishes its filesystem manipulation for that import task.
+| Setting            | Output                                 |
+| ------------------ | -------------------------------------- |
+| `save_square_webp` | Square animated WebP → `cover.webp`    |
+| `save_square_mp4`  | Square MP4 → `cover.mp4`               |
+| `save_tall_webp`   | Tall animated WebP → `cover-tall.webp` |
+| `save_tall_mp4`    | Tall MP4 → `cover-tall.mp4`            |
 
-By default, `asis` imports are skipped. Enable them with:
+The default configuration downloads only the square animated WebP:
 
 ```yaml
-fetchanimated:
-  fetch_for_asis: yes
+save_square_webp: yes
+save_square_mp4: no
+save_tall_webp: no
+save_tall_mp4: no
 ```
 
-Animated-art failures are logged as warnings and do not deliberately turn an otherwise successful beets import into a failed import.
+For example, to download both the square and tall artwork as animated WebP files:
 
-## Command line
+```yaml
+save_square_webp: yes
+save_square_mp4: no
+save_tall_webp: yes
+save_tall_mp4: no
+```
 
-### Query selected albums
+That creates both:
+
+```text
+cover.webp
+cover-tall.webp
+```
+
+in the album directory.
+
+You can also enable all four outputs at the same time.
+
+## Resolution and quality
+
+You specify the resolution you would **like** to receive:
+
+```yaml
+square_target_width: 768
+tall_target_width: 830
+resolution_policy: nearest
+```
+
+For every artwork, `fetchanimated` checks the resolutions that Apple actually provides.
+
+With the default `nearest` policy:
+
+1. If the exact requested width exists, it is selected.
+2. Otherwise, the closest available width is selected.
+3. If two available widths are equally close, the larger one is preferred.
+
+The selected video is kept at its existing source resolution; the plugin does not upscale it to your requested width.
+
+Available policies:
+
+* `nearest` — closest available width to your target.
+* `at_most` — largest available width that does not exceed your target; falls back to `nearest` if needed.
+* `at_least` — smallest available width that meets or exceeds your target; falls back to `nearest` if needed.
+* `highest` — always use the highest resolution offered for that artwork.
+
+Observed artwork variants currently reach up to:
+
+* Square: **2160×2160**
+* Tall: **2048×2732**
+
+Not every album provides every resolution or both artwork shapes.
+
+For WebP output, quality is configured separately:
+
+```yaml
+webp_quality: 80
+```
+
+MP4 output uses the selected source video stream without video re-encoding. WebP output is created from that selected stream with FFmpeg/libwebp at the configured quality.
+
+## Automatic artwork downloads
+
+With:
+
+```yaml
+auto: yes
+```
+
+`fetchanimated` automatically looks for animated artwork when beets successfully imports an album.
+
+If artwork is found, the enabled output files are written into the final album directory. If no animated artwork is available or the external artwork service is temporarily unavailable, the beets import itself is allowed to continue.
+
+By default, albums imported with beets' `asis` mode are skipped. To include them:
+
+```yaml
+fetch_for_asis: yes
+```
+
+## Command line: practical examples
+
+`beet fetchanimated` accepts normal beets album queries. These commands operate on albums already present in your beets database.
+
+### Find artwork for every album by an artist
 
 ```bash
-beet fetchanimated artist:"Daft Punk"
+beet fetchanimated albumartist:"Daft Punk"
 ```
 
-Any normal beets album query can be used.
+This processes all matching Daft Punk albums in your beets library. For every album where animated artwork is found, the enabled artwork files are placed directly into that album's existing directory.
 
-### Dry run
-
-Resolve artwork and HLS stream selection without writing files:
+### Find artwork for one album
 
 ```bash
-beet fetchanimated --dry-run artist:"Daft Punk"
+beet fetchanimated album:"Hybrid Theory"
 ```
 
-### Force replacement
+This searches the matching `Hybrid Theory` album in your beets library and, if successful, saves the enabled animated artwork directly into that album folder.
 
-Replace existing files for the currently enabled outputs:
+### Use album + artist when the album title is ambiguous
 
 ```bash
-beet fetchanimated --force artist:"Daft Punk"
+beet fetchanimated album:"Hybrid Theory" albumartist:"Linkin Park"
 ```
 
-### Limit a batch
+This is the safest way to target a specific release when multiple albums in your library share a similar or identical title.
+
+### Preview what would happen without writing files
+
+```bash
+beet fetchanimated --dry-run albumartist:"Daft Punk"
+```
+
+Use `--dry-run` when you want to check whether artwork is found and which source resolution would be selected without creating or replacing any files.
+
+### Process only a small batch
 
 ```bash
 beet fetchanimated --limit 10
 ```
 
-If `limit_log` is configured, an explicit `--limit` run appends a report there.
+This processes at most ten albums. It is useful for testing your configuration before running against a large library.
 
-### Full library
+You can combine a limit with a query:
+
+```bash
+beet fetchanimated --limit 5 albumartist:"Daft Punk"
+```
+
+### Replace artwork that already exists
+
+```bash
+beet fetchanimated --force album:"Hybrid Theory" albumartist:"Linkin Park"
+```
+
+By default, existing enabled artwork files are left untouched. Use `--force` when you intentionally want to recreate or replace them for that command.
+
+For permanent automatic replacement behavior:
+
+```yaml
+overwrite: yes
+```
+
+### Process the complete beets library
 
 ```bash
 beet fetchanimated --full-library
 ```
 
-A queryless `beet fetchanimated` is also accepted as a compatibility alias for a full-library run.
+This is useful for the first artwork backfill after installing the plugin or after enabling an additional output format.
 
-If `full_library_log` is configured, the run appends a human-readable report with saved, complete, unavailable, partial, and error counts.
+A queryless command is also supported:
 
-## Optional programmatic API
-
-Advanced integrations can ask the loaded plugin to ensure sidecars for an album that already exists in the beets library:
-
-```python
-result = plugin.ensure_album_assets(lib, album_id, force=False)
+```bash
+beet fetchanimated
 ```
 
-The helper uses only the standard beets `Library` object and album ID. It is not required for normal imports or for the `beet fetchanimated` command. The singular `ensure_album_asset(...)` alias is retained for backward compatibility.
+but `--full-library` is clearer and recommended for an intentional full-library run.
 
-## Interaction with FetchArt
+If `full_library_log` or `limit_log` is configured, the corresponding batch run also writes a persistent summary report.
 
-beets FetchArt can consider local `cover.*` files as static artwork candidates. Because the default animated sidecar is `cover.webp`, `fetchanimated` can narrowly filter its configured animated WebP filenames from FetchArt's **filesystem** source:
+## Existing artwork files
+
+The default behavior is deliberately safe:
 
 ```yaml
-fetchanimated:
-  protect_fetchart_filesystem: yes
+overwrite: no
 ```
 
-This does not modify `cover.jpg`, `album.artpath`, embedded images, or FetchArt's online sources.
+If an enabled output already exists in the album folder, it is not replaced. This makes it possible to run `fetchanimated` repeatedly without constantly regenerating artwork you already have.
 
-Disable the protection only if you intentionally want FetchArt to see those animated WebP files:
+Use `--force` for a one-time replacement or `overwrite: yes` if you intentionally want automatic overwriting.
+
+## FetchArt compatibility
+
+`fetchanimated` and beets FetchArt can be used together.
+
+FetchArt continues to manage your normal static album artwork, such as `cover.jpg`, while `fetchanimated` manages the animated artwork files.
+
+With the recommended default:
 
 ```yaml
-fetchanimated:
-  protect_fetchart_filesystem: no
+protect_fetchart_filesystem: yes
 ```
 
-## Moving albums
+the two plugins do not get in each other's way: `fetchanimated` keeps its configured animated WebP files separate from FetchArt's normal static-cover handling.
 
-With the default:
+Your existing static artwork is not replaced or modified.
+
+For normal setups, leave this option enabled.
+
+## Moving albums with beets
+
+With:
 
 ```yaml
-fetchanimated:
-  move_with_album: yes
+move_with_album: yes
 ```
 
-when beets moves the final audio file out of an old album directory, the plugin moves any known configured motion-art sidecars to the new album directory if the destination file does not already exist.
+known animated artwork files follow the album when beets later moves that album to a different directory, provided the destination artwork file does not already exist.
 
-## API and rate limiting
+## Troubleshooting and common messages
+
+For more detail while testing:
+
+```bash
+beet -vv fetchanimated --dry-run album:"Hybrid Theory" albumartist:"Linkin Park"
+```
+
+| Message                                                          | What it means / what to do                                                                                                                                                                                                          |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `no Apple Motion Artwork found`                                  | The m8tec resolver did not return animated artwork for that album. A normal API `404` is treated this way rather than as a fatal error. The release may simply have no animated artwork, or the resolver may not currently find it. |
+| `requested Apple Motion Artwork variant unavailable`             | The album was found, but the requested square/tall artwork could not be obtained. That shape may not exist, or its Apple HLS stream may currently be unavailable.                                                                   |
+| `square variant unavailable` / `tall variant unavailable`        | During a dry run, that specific artwork shape could not be resolved to a usable stream. Other enabled variants may still work.                                                                                                      |
+| `artwork API error; album skipped`                               | The external artwork API returned a non-404 HTTP error or could not be reached. This is usually a temporary service/network problem; retry later.                                                                                   |
+| `artwork API HTTP 429 ...`                                       | The external service is rate-limiting requests. Wait and retry later; the plugin also uses configurable request delays/backoff.                                                                                                     |
+| `could not read HLS manifest ... HTTP Error 404`                 | The artwork resolver returned an HLS URL that Apple no longer serves at that location, or the URL is temporarily unavailable. Retry later.                                                                                          |
+| `ffmpeg not found ...`                                           | FFmpeg is not available where beets is running. Install it in the same system/container or configure the correct executable path with `ffmpeg:`.                                                                                    |
+| `WebP encode` failed or `conversion did not produce a WebP file` | Check that your FFmpeg build includes the `libwebp` encoder.                                                                                                                                                                        |
+| `WebP is not animated; discarding it`                            | FFmpeg produced a WebP that did not contain animation, so the plugin refuses to save it as valid animated artwork.                                                                                                                  |
+| `all enabled animated artwork files exist`                       | Nothing is wrong. All configured outputs are already present and are being preserved. Use `--force` if you intentionally want to replace them.                                                                                      |
+| `no new animated artwork file saved`                             | Artwork was found but no requested output was successfully written. Run with `-vv` to see the underlying FFmpeg, manifest, or filesystem warning.                                                                                   |
+| `could not write ...` / permission errors                        | The beets process does not have permission to write to that album directory or destination filename.                                                                                                                                |
+
+## External API
 
 The default resolver is:
 
 ```yaml
-fetchanimated:
-  api_url: https://artwork.m8tec.top
+api_url: https://artwork.m8tec.top
 ```
 
-The service is external to this project. Availability, response behavior, and rate limits can change independently of the plugin.
+The resolver is an external service and is not operated by this project. Availability and behavior can therefore change independently of `fetchanimated`.
 
-The plugin spaces resolver searches using `api_request_delay_seconds` and backs off after resolver transport/service errors using `api_error_backoff_seconds`.
+## What fetchanimated does not change
 
-## What the plugin does not do
+* It does not modify audio metadata or tags.
+* It does not change album identity, artist metadata, track/disc numbering, or audio filenames.
+* It does not replace your static `cover.jpg`.
+* It does not replace beets FetchArt or EmbedArt.
+* It does not upscale the selected animated source video.
 
-- It does not modify audio metadata.
-- It does not modify album identity, track/disc numbering, paths, or filenames of audio files.
-- It does not replace beets FetchArt or EmbedArt.
-- It does not use static cover art as an input or dependency.
-- It does not upscale video to the configured target width; it chooses an existing Apple HLS variant.
+## Credits
 
-## Troubleshooting
+`fetchanimated` uses the public artwork API provided by [m8tec's Apple Music Animated Artwork Downloader](https://github.com/m8tec/apple-music-animated-artworks). Thanks to m8tec for making the resolver and API available for use by other projects.
 
-Run beets verbosely:
+## AI-assisted development
 
-```bash
-beet -vv fetchanimated --dry-run artist:"Daft Punk"
-```
-
-Common causes of skipped output are:
-
-- no motion artwork returned for the release;
-- the requested square/tall variant is unavailable;
-- the artwork resolver is temporarily unavailable;
-- an HLS manifest cannot be read;
-- FFmpeg is missing or not executable;
-- the installed FFmpeg lacks `libwebp` when WebP output is enabled;
-- the album directory is not writable.
+AI-assisted tools were used during development and documentation. AI-generated or AI-suggested changes included in releases were reviewed and tested by the maintainer. Responsibility for the released code remains with the maintainer.
 
 ## Development
 
-Install the project with development dependencies:
+For development and testing from a source checkout:
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -366,26 +448,16 @@ pytest
 python -m build
 ```
 
-The test suite is intentionally network-free. It checks core HLS parsing/selection, configuration behavior, package version consistency, and guards against reintroducing machine-specific or private configuration into the public source tree.
-
-## Credits
-
-Animated-artwork discovery is powered by the public [m8tec Apple Music Animated Artworks](https://github.com/m8tec/apple-music-animated-artworks) resolver at [`artwork.m8tec.top`](https://artwork.m8tec.top/). Thanks to m8tec for making the resolver available and documenting the Apple Music animated-artwork workflow.
-
-This project is independent from m8tec and is not affiliated with or endorsed by m8tec.
-
-## Development disclosure
-
-AI-assisted tools were used during development and documentation. All AI-generated or AI-suggested changes included in releases were reviewed and tested by the maintainer. Responsibility for the released code remains with the maintainer.
+The test suite is network-free and covers core configuration, HLS parsing/selection, and package consistency.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE). The MIT License applies to this project's software only; it does not grant rights to third-party artwork, trademarks, services, or other content.
+The source code in this repository is released under the MIT License. See [`LICENSE`](LICENSE).
 
-## Legal and third-party services
+## Legal disclaimer
 
 This is an independent, unofficial project and is not affiliated with or endorsed by Apple, Apple Music, beets, or m8tec.
 
-The plugin uses the third-party m8tec resolver and accesses media URLs returned by that service. Those external services and the artwork they expose are not part of this project and may be subject to their own terms, copyright, access restrictions, rate limits, and availability.
+Apple Music artwork and other third-party media remain the property of their respective rights holders. The MIT License for this project's source code does not grant any rights to Apple Music content or other third-party media retrieved through external services.
 
-Apple's Media Services Terms contain restrictions on automated scraping or extraction of service content and on circumventing security technologies. Users are responsible for reviewing and complying with the terms and laws applicable to their use and jurisdiction. Nothing in this repository grants rights to Apple Music content. This project is not intended to circumvent DRM, authentication, or other access controls.
+Users are responsible for complying with the terms of service and laws that apply to the services and media they access. `fetchanimated` does not include Apple Music artwork in this repository and is not intended to bypass DRM, authentication, paywalls, or other access controls.
