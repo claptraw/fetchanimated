@@ -28,6 +28,6 @@ First standalone public release.
 - Animated WebP encoding behavior.
 - Existing-file protection and `--force` behavior.
 - Atomic sidecar placement.
-- FetchArt filesystem protection for configured animated WebP sidecars.
+- fetchart filesystem protection for configured animated WebP sidecars.
 - Sidecar handling during later beets moves.
 - Query, dry-run, limit, and full-library command behavior.
