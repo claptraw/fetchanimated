@@ -1,6 +1,6 @@
 # fetchanimated
 
-fetchanimated is a [beets](https://beets.io/) plugin for downloading Apple Music animated album artwork directly into the matching album folders in your existing music library.
+`fetchanimated` is a [beets](https://beets.io/) plugin for downloading Apple Music animated album artwork directly into the matching album folders in your existing music library.
 
 It uses the public m8tec artwork API and supports square and tall artwork as animated WebP and/or MP4 files.
 
