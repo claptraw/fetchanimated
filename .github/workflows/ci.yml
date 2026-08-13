@@ -41,7 +41,7 @@ jobs:
       - name: Beets plugin smoke test
         shell: bash
         run: |
-          export BEETSDIR="$RUNNER_TEMP/beets-fetchanimated"
+          export BEETSDIR="$RUNNER_TEMP/fetchanimated"
           mkdir -p "$BEETSDIR"
           cat > "$BEETSDIR/config.yaml" <<'YAML'
           plugins: fetchanimated
