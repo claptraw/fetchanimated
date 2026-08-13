@@ -41,7 +41,7 @@ beet update -M
 
 ## Installation
 
-### 1. Install the plugin file — recommended
+### 1. Install the plugin file - recommended
 
 Locate the directory that contains your beets `config.yaml` and create a `beetsplug` directory next to it:
 
@@ -260,10 +260,10 @@ The selected video keeps its real source resolution; `fetchanimated` does not up
 
 Available policies:
 
-- `nearest` — closest available width to your target.
-- `at_most` — largest available width that does not exceed your target; falls back to `nearest` if needed.
-- `at_least` — smallest available width that meets or exceeds your target; falls back to `nearest` if needed.
-- `highest` — always use the highest available resolution.
+- `nearest` - closest available width to your target.
+- `at_most` - largest available width that does not exceed your target; falls back to `nearest` if needed.
+- `at_least` - smallest available width that meets or exceeds your target; falls back to `nearest` if needed.
+- `highest` - always use the highest available resolution.
 
 Observed artwork variants currently reach up to:
 
