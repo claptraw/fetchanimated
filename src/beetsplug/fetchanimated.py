@@ -806,10 +806,6 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
             return None
         output = self._temp_path(f".{variant_name}.webp")
 
-        # Intentionally mirrors artwork.m8tec.top's WebP path: libwebp,
-        # infinite loop and q:v. We do not set compression_level, lossless, a
-        # spatial scale filter or an fps filter. The selected Apple HLS stream's
-        # native frame cadence is preserved instead of duplicating/dropping frames.
         command = [
             self.ffmpeg_path,
             "-hide_banner",
