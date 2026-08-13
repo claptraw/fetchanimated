@@ -140,7 +140,7 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
                 "resolution_policy": "nearest",
                 "webp_quality": 80,
                 "ffmpeg": "ffmpeg",
-                "api_timeout": 20,
+                "api_timeout": 60,
                 "api_request_delay_seconds": 3.0,
                 "api_error_backoff_seconds": 30.0,
                 "manifest_timeout": 20,
