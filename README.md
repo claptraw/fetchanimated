@@ -1,6 +1,6 @@
-# fetchanimated
+# 🌀 fetchanimated
 
-`fetchanimated` is a [beets](https://beets.io/) plugin for downloading Apple Music animated album artwork directly into the matching album folders in your existing music library.
+fetchanimated is a [beets](https://beets.io/) plugin for downloading Apple Music animated album artwork directly into the matching album folders in your existing music library.
 
 It uses the public m8tec artwork API and supports square and tall artwork as animated WebP and/or MP4 files.
 
@@ -9,21 +9,22 @@ It uses the public m8tec artwork API and supports square and tall artwork as ani
 - Manual or automatic animated-artwork downloads via the public m8tec API.
 - **Square** and **tall** artwork variants.
 - **Animated WebP**, **MP4**, or any combination of formats and variants.
-- Configurable target resolution and WebP quality; observed sources reach up to **2160×2160** square and **2048×2732** tall.
+- Configurable target resolution and WebP quality; up to **2160×2160** square and **2048×2732** tall.
 - Smart source selection: exact requested resolution when available, otherwise the nearest matching size.
-- Search one album, artist + album, all albums by an artist, or the complete beets library.
-- Automatic artwork fetching for newly imported albums with `auto: yes`.
-- Saves directly into the album folder; default square WebP is `cover.webp`, suitable for Navidrome and clients such as Narjo.
+- Search for a specific album, artist + album, all albums by an artist, or artworks for your entire library.
+- Automatic artwork fetching when beets imports a new album.
+- Saves directly into the album folder
+- Works seamlessly with Navidrome and clients supporting animated cover art (e.g. Narjo or Sonamp).
 - Existing artwork is preserved unless you explicitly overwrite it.
-- Dry-run mode previews matches and selected resolutions without writing files.
-- Animated artwork can follow albums when beets moves them.
+- Dry-run mode to preview matches and selected resolutions without writing files.
+- Animated artwork can follow albums when beets moves the albums.
 - Works alongside beets `fetchart` without replacing your normal static cover.
 
-## Important: beets library database
+## Prerequisite: up-to-date beets library database file
 
-`fetchanimated` works from the **beets library database**. It does not scan arbitrary music folders to discover albums.
+fetchanimated works from the **beets library database**. It does not scan your local music folders to discover albums.
 
-The albums you want to process therefore need to exist in your beets database, and the paths stored by beets should still point to the actual album directories on disk.
+The albums you want to process need to exist in your beets database, and the paths stored by beets should point to the actual album directories on disk.
 
 If you are unsure whether the database still matches your files, first preview a beets update without moving files:
 
@@ -36,14 +37,15 @@ If the preview looks correct, apply it with:
 ```bash
 beet update -M
 ```
+An up-to-date beets database file is necessary to make sure that fetchanimated can move the animated artwork in the correct album folder on its own.
 
 `beet update` refreshes existing library entries from files and reflects deletions. It does **not** discover brand-new files or automatically find files that were manually moved to an unknown location outside beets; those need to be imported or corrected separately.
 
 ## Installation
 
-### 1. Install the plugin file - recommended
+### 1. Install the plugin file - recommended method
 
-Locate the directory that contains your beets `config.yaml` and create a `beetsplug` directory next to it:
+Locate the directory that contains your beets `config.yaml` and create a `beetsplug` folder next to it:
 
 ```text
 beets-config/
@@ -52,7 +54,7 @@ beets-config/
     └── fetchanimated.py
 ```
 
-Copy `src/beetsplug/fetchanimated.py` from this repository into that directory.
+Copy `src/beetsplug/fetchanimated.py` from this repository into that folder.
 
 Then add a `pluginpath` entry to your **`config.yaml`** so beets knows where to find the plugin. Use the path that is valid **inside the environment where beets runs**:
 
@@ -71,7 +73,7 @@ plugins: fetchart embedart fetchanimated
 
 Do not remove your existing plugins; just add `fetchanimated`.
 
-Finally, copy the complete `fetchanimated:` section from [`config.example.yaml`](config.example.yaml) into your `config.yaml`. The full configuration is also shown below.
+Finally, copy the complete `fetchanimated:` section from [`config.example.yaml`](config.example.yaml) into your `config.yaml`. The full configuration with explaining comments is also shown below.
 
 ### 2. Install FFmpeg
 
@@ -98,7 +100,7 @@ winget install --id Gyan.FFmpeg -e
 
 If beets runs inside Docker or another container, FFmpeg must also be available **inside that container/environment**. Installing FFmpeg only on the host is not sufficient.
 
-Verify the installation:
+Verify the installation in the container:
 
 ```bash
 ffmpeg -version
@@ -132,7 +134,7 @@ beet version
 
 ## Configuration
 
-Add `fetchanimated` to your existing plugin list and copy the complete configuration block below into `config.yaml`. Adjust the values you want to change, but keep the full section so all available options remain visible.
+Add fetchanimated to your existing plugin list and copy the complete configuration block below into `config.yaml`. Adjust the values you want to change, but keep the full section so all available options remain visible.
 
 ```yaml
 # Add fetchanimated to your existing plugin list, for example:
@@ -152,7 +154,7 @@ fetchanimated:
   # Public artwork resolver used by the plugin.
   api_url: https://artwork.m8tec.top
 
-  # Output formats. They can be enabled independently or in any combination.
+  # Output formats. Can be enabled independently or in any combination.
   save_square_webp: yes
   save_square_mp4: no
   save_tall_mp4: no
@@ -166,6 +168,13 @@ fetchanimated:
 
   # Desired target widths. fetchanimated checks which source resolutions are
   # actually available and selects one according to resolution_policy.
+  # Observed Square range (informational only):
+  #   min: 360x360
+  #   max: 2160x2160
+  #
+  # Observed Tall range (informational only):
+  #   min: 310x414
+  #   max: 2048x2732 
   square_target_width: 768
   tall_target_width: 830
   resolution_policy: nearest
@@ -184,9 +193,10 @@ fetchanimated:
   ffmpeg_timeout: 600
 
   # Existing animated artwork files are preserved by default.
+  # Choose yes if you want to override an existing animated artwork file.
   overwrite: no
 
-  # Move known animated artwork files when beets later moves the album.
+  # Move known animated artwork files when beets moves the album.
   move_with_album: yes
 
   # Small delay between albums during batch commands.
@@ -248,7 +258,7 @@ tall_target_width: 830
 resolution_policy: nearest
 ```
 
-`fetchanimated` checks which source resolutions are actually available for that artwork and then selects the best match.
+fetchanimated checks which source resolutions are actually available for that artwork and then selects the best match.
 
 With the default `nearest` policy:
 
@@ -256,7 +266,7 @@ With the default `nearest` policy:
 2. otherwise, the nearest available width is selected;
 3. on an exact tie, the larger source is preferred.
 
-The selected video keeps its real source resolution; `fetchanimated` does not upscale it.
+The selected video keeps its real source resolution; fetchanimated does not upscale it.
 
 Available policies:
 
@@ -288,9 +298,9 @@ With:
 auto: yes
 ```
 
-`fetchanimated` automatically looks for animated artwork when beets successfully imports an album.
+fetchanimated automatically looks for animated artwork when beets successfully imports an album.
 
-If artwork is found, the enabled output files are written into the final album directory. If no animated artwork is available or the external artwork service is temporarily unavailable, the beets import itself continues.
+If an animated artwork is found, the configured output files are written into the final album directory. If no animated artwork is available or the external artwork service is temporarily unavailable, the beets import itself continues.
 
 By default, albums imported with beets' `asis` mode are skipped. To include them:
 
@@ -308,7 +318,7 @@ fetch_for_asis: yes
 beet fetchanimated albumartist:"Daft Punk"
 ```
 
-Use this to search animated artwork for every Daft Punk album currently in your beets library. Successful results are saved directly into each matching album folder.
+Use this to search animated artwork for every Daft Punk album currently in your beets library. Successful results are saved directly into the corresponding album folder.
 
 ### Search one album
 
@@ -316,7 +326,7 @@ Use this to search animated artwork for every Daft Punk album currently in your 
 beet fetchanimated album:"Hybrid Theory"
 ```
 
-Use this when you want artwork for one specific album title. If a match is found, the enabled artwork files are written directly into that album's existing library folder.
+Use this when you want artwork for one specific album. If a match is found, the configured artwork files are written directly into that album's existing library folder.
 
 ### Search by album + artist
 
@@ -340,7 +350,7 @@ Use `--dry-run` to check which albums match, whether animated artwork is availab
 beet fetchanimated --limit 10
 ```
 
-Use this to test your configuration on at most ten albums before starting a larger run.
+Use this to test your configuration on at most ten albums before starting a larger run. Use any number you want.
 
 You can combine a limit with a query:
 
@@ -354,7 +364,7 @@ beet fetchanimated --limit 5 albumartist:"Daft Punk"
 beet fetchanimated --force album:"Hybrid Theory" albumartist:"Linkin Park"
 ```
 
-Existing enabled artwork is preserved by default. Use `--force` when you intentionally want to recreate or replace it for this command only.
+Existing enabled artwork is preserved by default. Use `--force` when you intentionally want to recreate or replace it this time only.
 
 For permanent automatic replacement behavior:
 
@@ -370,7 +380,7 @@ beet fetchanimated --full-library
 
 Use this for an initial animated-artwork backfill or after enabling additional output formats.
 
-A full-library run can take **several hours** on a large library. Each album may require API/HLS requests and, for WebP, FFmpeg encoding. `fetchanimated` also deliberately spaces API requests and backs off after API errors to reduce service timeouts and rate-limit problems.
+A full-library run can take **several hours or even days** on a large library. Each album may require API/HLS requests and FFmpeg encoding for WebP. fetchanimated also deliberately spaces API requests and backs off after API errors to reduce service timeouts and rate-limit problems.
 
 A queryless command is also supported:
 
@@ -382,7 +392,7 @@ but `--full-library` is clearer and recommended for an intentional full-library 
 
 ## Persistent batch reports
 
-Reports are optional. To enable them, set an actual file path in `config.yaml`:
+Reports after `--limit` and `--full-library` runs are optional. To enable them, set an actual file path in `config.yaml`:
 
 ```yaml
 fetchanimated:
@@ -420,9 +430,9 @@ Use `--force` for a one-time replacement or `overwrite: yes` if you intentionall
 
 ## fetchart compatibility
 
-`fetchanimated` and beets `fetchart` can be used together without getting in each other's way.
+fetchanimated and beets `fetchart` can be used together without getting in each other's way.
 
-`fetchart` continues to manage your normal static album artwork such as `cover.jpg`, while `fetchanimated` manages the animated artwork files.
+`fetchart` continues to manage your normal static album artwork such as `cover.jpg`, while fetchanimated manages the animated artwork files.
 
 With the recommended default:
 
@@ -430,7 +440,7 @@ With the recommended default:
 protect_fetchart_filesystem: yes
 ```
 
-`fetchanimated` keeps its configured animated WebP files separate from `fetchart`'s normal static-cover handling. Your existing static artwork is not replaced or modified.
+fetchanimated keeps its configured animated WebP files separate from `fetchart`'s normal static-cover handling. Your existing static artwork is not replaced or modified.
 
 For normal setups, leave this option enabled.
 
@@ -475,7 +485,7 @@ The default resolver is:
 api_url: https://artwork.m8tec.top
 ```
 
-The resolver is an external service and is not operated by this project. Availability and behavior can therefore change independently of `fetchanimated`.
+The resolver is an external service and is not operated by this project. Availability and behavior can therefore change independently of fetchanimated.
 
 ## What fetchanimated does not change
 
@@ -487,11 +497,11 @@ The resolver is an external service and is not operated by this project. Availab
 
 ## Credits
 
-`fetchanimated` uses the public artwork API provided by [m8tec's Apple Music Animated Artwork Downloader](https://github.com/m8tec/apple-music-animated-artworks). Thanks to m8tec for making the resolver and API available for use by other projects.
+fetchanimated uses the public artwork API provided by [m8tec's Apple Music Animated Artwork Downloader](https://github.com/m8tec/apple-music-animated-artworks). Thanks to m8tec for making the resolver and API available for use by other projects.
 
 ## AI-assisted development
 
-AI-assisted tools were used during development and documentation. AI-generated or AI-suggested changes included in releases were reviewed and tested by the maintainer. Responsibility for the released code remains with the maintainer.
+AI-assisted tools were used during development and documentation. AI-generated or AI-suggested changes included in releases were reviewed and tested by the maintainer.
 
 ## Development
 
@@ -515,4 +525,4 @@ This is an independent, unofficial project and is not affiliated with or endorse
 
 Apple Music artwork and other third-party media remain the property of their respective rights holders. The MIT License for this project's source code does not grant any rights to Apple Music content or other third-party media retrieved through external services.
 
-Users are responsible for complying with the terms of service and laws that apply to the services and media they access. `fetchanimated` does not include Apple Music artwork in this repository and is not intended to bypass DRM, authentication, paywalls, or other access controls.
+Users are responsible for complying with the terms of service and laws that apply to the services and media they access. fetchanimated does not include Apple Music artwork in this repository and is not intended to bypass DRM, authentication, paywalls, or other access controls.
