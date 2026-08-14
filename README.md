@@ -43,9 +43,13 @@ It uses the public m8tec artwork API and supports square and tall artwork as ani
 - Animated artwork can follow albums when beets moves the albums.
 - Works alongside beets `fetchart` without replacing your normal static cover.
 
-## Prerequisite: up-to-date beets library database file
+## Prerequisites: beets and up-to-date beets library database file
 
-fetchanimated works from the **beets library database**. It does not scan your local music folders to discover albums.
+fetchanimated is a plugin for [beets](https://beets.io/) and requires a working beets installation to function.
+
+If you want to use this album artwork functionality as a standalone tool, I recommend using [m8tec's apple music animated artworks](https://github.com/m8tec/apple-music-animated-artworks).
+
+fetchanimated relies on the **beets library database**. It does not scan your local music folders to discover albums.
 
 The albums you want to process need to exist in your beets database, and the paths stored by beets should point to the actual album directories on disk.
 
