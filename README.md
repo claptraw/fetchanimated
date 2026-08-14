@@ -4,6 +4,29 @@ fetchanimated is a [beets](https://beets.io/) plugin for downloading Apple Music
 
 It uses the public m8tec artwork API and supports square and tall artwork as animated WebP and/or MP4 files.
 
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>Square Cover</strong></td>
+    <td align="center" width="50%"><strong>Tall Cover</strong></td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src=".github/assets/fetchanimated-square.gif"
+           alt="Square animated cover preview"
+           style="max-width: 100%; border-radius: 8px;">
+    </td>
+    <td align="center">
+      <img src=".github/assets/fetchanimated-tall.gif"
+           alt="Tall animated cover preview"
+           style="max-width: 100%; border-radius: 8px;">
+    </td>
+  </tr>
+</table>
+
+</div>
+
 ## Features
 
 - Manual or automatic animated-artwork downloads via the public m8tec API.
