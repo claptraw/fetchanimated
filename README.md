@@ -35,8 +35,6 @@ It uses the public m8tec artwork API and supports square and tall artwork as ani
 - Configurable target resolution and WebP quality; up to **2160×2160** square and **2048×2732** tall.
 - Smart source selection: exact requested resolution when available, otherwise the nearest matching size.
 - Search for a specific album, artist + album, all albums by an artist, or artworks for your entire library.
-- Retry only technical API failures from a previous full-library/retry report without re-querying confirmed `NOT FOUND` albums.
-- Narrow numeric-suffix safety guard rejects clear sequel cache collisions such as `Album` vs `Album 2` without introducing a general title matcher.
 - Automatic artwork fetching when beets imports a new album.
 - Saves directly into the album folder
 - Works seamlessly with Navidrome and clients supporting animated cover art (e.g. Narjo or Sonamp).
