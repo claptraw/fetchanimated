@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here.
 
+## 0.1.2 - 2026-08-16
+
+### Added
+
+- Added `--retry-errors PATH` to retry only albums listed in the `ERRORS` section of the most recent eligible full-library or retry-errors report.
+- Added optional `retry_errors_log` reporting, including unresolved current-library labels that are skipped rather than guessed.
+- Added a narrow numeric-suffix safety guard for clear sequel cache collisions such as `Album` vs `Album 2` or `Album 2` vs `Album 3`.
+
+### Safety
+
+- The numeric guard is intentionally not a general album-title matcher. Alphanumeric names such as `DS4EVER` / `DRIP SEASON 4EVER`, punctuation variants such as `LONG.LIVE.A$AP`, and normal edition suffixes remain outside this veto.
+- Retry mode never re-queries confirmed `NOT FOUND` entries from the source report and only processes logged labels that map to exactly one current Beets album.
+
+### Preserved
+
+- m8tec remains the normal Apple Music artwork resolver.
+- Existing HLS selection, native-FPS WebP encoding, optional output formats, existing-file protection, fetchart isolation, import hooks, move/copy handling, API pacing/backoff, and batch report behavior remain unchanged.
+
 ## 0.1.1 - 2026-08-13
 
 ### Changed

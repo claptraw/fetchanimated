@@ -1,6 +1,6 @@
 """Fetch Apple Music animated album artwork for beets.
 
-fetchanimated v0.1.1 is a standalone beets plugin intentionally isolated from static album artwork:
+fetchanimated v0.1.2 is a standalone beets plugin intentionally isolated from static album artwork:
 
 * It never requires or modifies ``cover.jpg``, ``album.artpath`` or embedded
   artwork.
@@ -16,7 +16,7 @@ fetchanimated v0.1.1 is a standalone beets plugin intentionally isolated from st
   manual ``--force`` option is used.
 * Automatic and interactive beets album imports use standard beets import hooks.
 * A standalone ``beet fetchanimated`` command supports queries, dry runs,
-  limited batches and full-library backfills.
+  limited batches, full-library backfills, and retries of prior API errors.
 
 Because beets fetchart accepts WebP files from its filesystem source and local
 files named ``cover.*`` can become static artwork candidates, this plugin
@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -49,7 +50,7 @@ if TYPE_CHECKING:
     from beets.library import Album, Library
 
 
-PLUGIN_VERSION = "0.1.1"
+PLUGIN_VERSION = "0.1.2"
 
 
 @dataclass(frozen=True)
@@ -150,6 +151,7 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
                 "batch_delay_seconds": 0.25,
                 "full_library_log": "",
                 "limit_log": "",
+                "retry_errors_log": "",
                 "protect_fetchart_filesystem": True,
                 "user_agent": (
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -421,6 +423,50 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
             pass
         return None
 
+    @staticmethod
+    def _title_tokens(value: str) -> list[str]:
+        """Normalize a title only for the narrow numeric-suffix safety check."""
+        folded = unicodedata.normalize("NFKD", value.casefold())
+        ascii_value = folded.encode("ascii", "ignore").decode("ascii")
+        return re.findall(r"[a-z0-9]+", ascii_value)
+
+    @classmethod
+    def _numeric_suffix_conflict(cls, requested: str, returned: str) -> bool:
+        """Detect only an otherwise-identical standalone numeric suffix mismatch.
+
+        Examples rejected: ``Gangsta Art`` vs ``Gangsta Art 2`` and
+        ``Gangsta Art 2`` vs ``Gangsta Art 3``. Alphanumeric names such as
+        ``DS4EVER`` / ``DRIP SEASON 4EVER`` and punctuation-only differences
+        such as ``LONG.LIVE.A$AP`` remain outside this guard.
+        """
+        requested_tokens = cls._title_tokens(requested)
+        returned_tokens = cls._title_tokens(returned)
+        if not requested_tokens or not returned_tokens:
+            return False
+        if requested_tokens == returned_tokens:
+            return False
+
+        if (
+            len(requested_tokens) == len(returned_tokens)
+            and len(requested_tokens) >= 2
+            and requested_tokens[:-1] == returned_tokens[:-1]
+            and requested_tokens[-1].isdigit()
+            and returned_tokens[-1].isdigit()
+        ):
+            return requested_tokens[-1] != returned_tokens[-1]
+
+        if len(requested_tokens) + 1 == len(returned_tokens):
+            return (
+                requested_tokens == returned_tokens[:-1]
+                and returned_tokens[-1].isdigit()
+            )
+        if len(returned_tokens) + 1 == len(requested_tokens):
+            return (
+                returned_tokens == requested_tokens[:-1]
+                and requested_tokens[-1].isdigit()
+            )
+        return False
+
     def _wait_before_api_request(self) -> None:
         """Space public API searches without delaying the first request."""
         delay = max(0.0, self.config["api_request_delay_seconds"].get(float))
@@ -508,10 +554,24 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
         api_artist = api_artist if isinstance(api_artist, str) else None
         api_album = api_album if isinstance(api_album, str) else None
 
-        # Do not apply a second, fetchanimated-specific title/artist matcher
-        # here. The m8tec /api/v1/artwork/search endpoint has already resolved
-        # the Apple Music release using its own search/cache policy. Trust that
-        # result so command-line and automated searches behave like m8tec itself.
+        # Keep m8tec as the resolver, but veto one proven cache-collision class:
+        # an otherwise identical album title with a different/missing standalone
+        # numeric suffix at the very end (e.g. "Gangsta Art" vs "Gangsta Art 2").
+        # This is intentionally not a general title matcher.
+        if api_album and self._numeric_suffix_conflict(album_name, api_album):
+            self._log.warning(
+                "fetchanimated: rejecting numeric-suffix mismatch for {} - {} "
+                "(m8tec returned {} - {})",
+                artist,
+                album_name,
+                api_artist or "?",
+                api_album,
+            )
+            return None
+
+        # Do not apply any broader fetchanimated-specific title/artist matcher.
+        # The m8tec /api/v1/artwork/search endpoint still owns normal Apple
+        # Music release resolution and cache policy.
         return ResolverResult(
             square_url=square_url,
             tall_url=tall_url,
@@ -1264,6 +1324,74 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
             variant_name,
         )
 
+    def _album_label(self, album: Album) -> str:
+        return (
+            f"{self._text(getattr(album, 'albumartist', ''))} - "
+            f"{self._text(getattr(album, 'album', ''))}"
+        ).strip(" -")
+
+    def _load_retry_error_labels(self, report_path: str) -> list[str] | None:
+        """Read ERRORS from the most recent eligible fetchanimated report.
+
+        Labels stay intact and are matched against the exact current Beets
+        ``Album Artist - Album`` label. Ambiguous or missing current-library
+        matches are never guessed.
+        """
+        path = os.path.expanduser(report_path)
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                lines = handle.read().splitlines()
+        except OSError as exc:
+            self._log.warning(
+                "fetchanimated: cannot read retry source report {}: {}",
+                path,
+                exc,
+            )
+            ui.print_(f"fetchanimated: cannot read retry source report: {path}")
+            return None
+
+        report_starts = [
+            index
+            for index, line in enumerate(lines)
+            if line.startswith("fetchanimated v")
+            and (
+                " full-library report" in line
+                or " retry-errors report" in line
+            )
+        ]
+        if not report_starts:
+            ui.print_("fetchanimated: retry source contains no eligible report")
+            return None
+
+        current = lines[report_starts[-1] :]
+        error_index = next(
+            (
+                index
+                for index, line in enumerate(current)
+                if line.startswith("ERRORS (")
+            ),
+            None,
+        )
+        if error_index is None:
+            return []
+
+        labels: list[str] = []
+        seen: set[str] = set()
+        for line in current[error_index + 1 :]:
+            if not line.strip():
+                break
+            if not line.startswith("- ") or line == "- none":
+                continue
+            body = line[2:]
+            if " -- " not in body:
+                continue
+            label, _reason = body.rsplit(" -- ", 1)
+            label = label.strip()
+            if label and label not in seen:
+                labels.append(label)
+                seen.add(label)
+        return labels
+
     def commands(self) -> list[ui.Subcommand]:
         cmd = ui.Subcommand(
             "fetchanimated",
@@ -1299,10 +1427,100 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
             default=False,
             help="process the complete Beets album library and write its report",
         )
+        cmd.parser.add_option(
+            "--retry-errors",
+            dest="retry_errors_log",
+            metavar="PATH",
+            default=None,
+            help=(
+                "retry only albums listed in the ERRORS section of the most "
+                "recent full-library or retry-errors report at PATH"
+            ),
+        )
 
         def func(lib: Library, opts: Any, args: list[str]) -> None:
             limit = max(0, int(opts.limit or 0))
             full_library = bool(opts.full_library)
+            retry_errors_log = self._text(opts.retry_errors_log)
+
+            if retry_errors_log:
+                if full_library:
+                    ui.print_(
+                        "fetchanimated: --retry-errors cannot be combined with --full-library"
+                    )
+                    return
+                if args:
+                    ui.print_(
+                        "fetchanimated: --retry-errors cannot be combined with a Beets query"
+                    )
+                    return
+
+                retry_labels = self._load_retry_error_labels(retry_errors_log)
+                if retry_labels is None:
+                    return
+                if not retry_labels:
+                    ui.print_(
+                        "fetchanimated: the most recent eligible report contains no errors"
+                    )
+                    return
+
+                retry_set = set(retry_labels)
+                current_matches: dict[str, list[Album]] = {
+                    label: [] for label in retry_labels
+                }
+                for album in lib.albums():
+                    label = self._album_label(album)
+                    if label in retry_set:
+                        current_matches[label].append(album)
+
+                retry_albums: list[Album] = []
+                unresolved_labels: list[str] = []
+                for label in retry_labels:
+                    matches = current_matches.get(label, [])
+                    if len(matches) == 1:
+                        retry_albums.append(matches[0])
+                    else:
+                        unresolved_labels.append(label)
+                        if len(matches) > 1:
+                            self._log.warning(
+                                "fetchanimated: retry label {!r} matches {} current "
+                                "Beets albums; skipping ambiguous retry",
+                                label,
+                                len(matches),
+                            )
+
+                if unresolved_labels:
+                    self._log.warning(
+                        "fetchanimated: {} retry-error album label(s) could not be "
+                        "matched uniquely to the current Beets library",
+                        len(unresolved_labels),
+                    )
+
+                ui.print_(
+                    f"fetchanimated: retrying {len(retry_albums)} album(s) from "
+                    f"{retry_errors_log}"
+                )
+                if unresolved_labels:
+                    ui.print_(
+                        f"fetchanimated: {len(unresolved_labels)} logged error album(s) "
+                        "could not be matched uniquely to the current library"
+                    )
+
+                self.batch_fetch(
+                    lib,
+                    retry_albums,
+                    force=bool(opts.force),
+                    dry_run=bool(opts.dry_run),
+                    limit=limit,
+                    full_library_run=False,
+                    limit_run=False,
+                    query_args=[],
+                    retry_run=True,
+                    retry_source_log=retry_errors_log,
+                    retry_requested=len(retry_labels),
+                    retry_unmatched=unresolved_labels,
+                )
+                return
 
             if full_library and args:
                 ui.print_(
@@ -1488,6 +1706,89 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
             )
             return None
 
+    def _write_retry_errors_log(
+        self,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+        dry_run: bool,
+        source_log: str,
+        requested: int,
+        limit: int,
+        unmatched_labels: list[str],
+        processed: int,
+        saved_albums: int,
+        saved_files: int,
+        complete_albums: int,
+        no_art_entries: list[tuple[str, str]],
+        partial_entries: list[tuple[str, str]],
+        error_entries: list[tuple[str, str]],
+    ) -> str | None:
+        """Append one report for a retry of prior batch API errors."""
+        raw_path = self.config["retry_errors_log"].get(str).strip()
+        if not raw_path:
+            return None
+        path = os.path.expanduser(raw_path)
+        try:
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+
+            enabled_names = ", ".join(spec.filename for spec in self._enabled_specs())
+            lines = [
+                "=" * 72,
+                f"fetchanimated v{PLUGIN_VERSION} retry-errors report",
+                f"started:  {started_at.astimezone().isoformat(timespec='seconds')}",
+                f"finished: {finished_at.astimezone().isoformat(timespec='seconds')}",
+                f"mode: {'dry-run' if dry_run else 'write'}",
+                f"source log: {source_log}",
+                f"source error albums: {requested}",
+                f"retry limit: {limit if limit else 'unlimited'}",
+                f"unresolved current-library labels: {len(unmatched_labels)}",
+                f"enabled outputs: {enabled_names or '-'}",
+                "",
+                f"processed albums: {processed}",
+                f"albums with new artwork: {saved_albums}",
+                f"saved/updated files: {saved_files}",
+                f"skipped/already complete albums: {complete_albums}",
+                f"not found/requested artwork unavailable: {len(no_art_entries)}",
+                f"partially completed albums: {len(partial_entries)}",
+                f"errors: {len(error_entries)}",
+                "",
+            ]
+
+            lines.append(
+                f"NOT FOUND / REQUESTED ARTWORK UNAVAILABLE ({len(no_art_entries)})"
+            )
+            if no_art_entries:
+                lines.extend(f"- {label} -- {reason}" for label, reason in no_art_entries)
+            else:
+                lines.append("- none")
+
+            if partial_entries:
+                lines.extend(["", f"PARTIAL ({len(partial_entries)})"])
+                lines.extend(f"- {label} -- {reason}" for label, reason in partial_entries)
+
+            if error_entries:
+                lines.extend(["", f"ERRORS ({len(error_entries)})"])
+                lines.extend(f"- {label} -- {reason}" for label, reason in error_entries)
+
+            if unmatched_labels:
+                lines.extend(["", f"UNRESOLVED ({len(unmatched_labels)})"])
+                lines.extend(f"- {label}" for label in unmatched_labels)
+
+            lines.append("")
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+            return path
+        except Exception as exc:
+            self._log.warning(
+                "fetchanimated: could not write retry-errors report {}: {}",
+                path,
+                exc,
+            )
+            return None
+
     def batch_fetch(
         self,
         lib: Library,
@@ -1499,6 +1800,10 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
         full_library_run: bool = False,
         limit_run: bool = False,
         query_args: list[str] | None = None,
+        retry_run: bool = False,
+        retry_source_log: str = "",
+        retry_requested: int = 0,
+        retry_unmatched: list[str] | None = None,
     ) -> None:
         self._protect_fetchart_filesystem()
         effective_force = self._effective_force(force)
@@ -1528,10 +1833,7 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
                 time.sleep(delay)
             processed += 1
 
-            label = (
-                f"{self._text(getattr(album, 'albumartist', ''))} - "
-                f"{self._text(getattr(album, 'album', ''))}"
-            ).strip(" -")
+            label = self._album_label(album)
 
             pending = self._pending_specs(album, force=effective_force)
             if not pending:
@@ -1658,7 +1960,26 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
         ui.print_(f"  partially completed albums: {partial_albums}")
         ui.print_(f"  errors: {error_albums}")
 
-        if full_library_run:
+        if retry_run:
+            report_path = self._write_retry_errors_log(
+                started_at=started_at,
+                finished_at=datetime.now(timezone.utc),
+                dry_run=dry_run,
+                source_log=retry_source_log,
+                requested=retry_requested,
+                limit=limit,
+                unmatched_labels=list(retry_unmatched or []),
+                processed=processed,
+                saved_albums=saved_albums,
+                saved_files=saved_files,
+                complete_albums=complete_albums,
+                no_art_entries=no_art_entries,
+                partial_entries=partial_entries,
+                error_entries=error_entries,
+            )
+            if report_path:
+                ui.print_(f"  retry-errors log: {report_path}")
+        elif full_library_run:
             report_path = self._write_full_library_log(
                 started_at=started_at,
                 finished_at=datetime.now(timezone.utc),

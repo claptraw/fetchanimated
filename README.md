@@ -35,6 +35,8 @@ It uses the public m8tec artwork API and supports square and tall artwork as ani
 - Configurable target resolution and WebP quality; up to **2160×2160** square and **2048×2732** tall.
 - Smart source selection: exact requested resolution when available, otherwise the nearest matching size.
 - Search for a specific album, artist + album, all albums by an artist, or artworks for your entire library.
+- Retry only technical API failures from a previous full-library/retry report without re-querying confirmed `NOT FOUND` albums.
+- Narrow numeric-suffix safety guard rejects clear sequel cache collisions such as `Album` vs `Album 2` without introducing a general title matcher.
 - Automatic artwork fetching when beets imports a new album.
 - Saves directly into the album folder
 - Works seamlessly with Navidrome and clients supporting animated cover art (e.g. Narjo or Sonamp).
@@ -232,6 +234,7 @@ fetchanimated:
   # Optional persistent batch reports. Empty disables report-file output.
   full_library_log: ""
   limit_log: ""
+  retry_errors_log: ""
 
   # Keep animated WebP files separate from fetchart's static cover handling.
   protect_fetchart_filesystem: yes
@@ -347,21 +350,21 @@ beet fetchanimated albumartist:"Daft Punk"
 
 Use this to search animated artwork for every Daft Punk album currently in your beets library. Successful results are saved directly into the corresponding album folder.
 
-### Search one album
+### Search one exact album
 
 ```bash
-beet fetchanimated album:"Hybrid Theory"
+beet fetchanimated 'album:=~Hybrid Theory'
 ```
 
-Use this when you want artwork for one specific album. If a match is found, the configured artwork files are written directly into that album's existing library folder.
+Use beets' case-insensitive exact-match operator `:=~` when you want one specific album title rather than a broader substring query. If a match is found, the configured artwork files are written directly into that album's existing library folder.
 
-### Search by album + artist
+### Search by exact album + artist
 
 ```bash
-beet fetchanimated album:"Hybrid Theory" albumartist:"Linkin Park"
+beet fetchanimated 'album:=~Hybrid Theory' 'albumartist:=~Linkin Park'
 ```
 
-Use this when an album title is ambiguous or you want to target one exact artist/album combination.
+Use both exact fields when an album title is ambiguous or you want to target one exact artist/album combination. Normal beets substring queries remain available when you intentionally want a broader selection.
 
 ### Preview without writing files
 
@@ -417,14 +420,33 @@ beet fetchanimated
 
 but `--full-library` is clearer and recommended for an intentional full-library run.
 
+### Retry only previous API errors
+
+```bash
+beet fetchanimated --retry-errors /path/to/fetchanimated-full-library.log
+```
+
+`--retry-errors` reads the `ERRORS` section from the most recent eligible full-library or retry-errors report and retries only those albums. Confirmed `NOT FOUND` entries are not queried again. Logged album labels must map to exactly one current Beets album; missing or ambiguous labels are skipped rather than guessed.
+
+You can first test a smaller retry batch:
+
+```bash
+beet fetchanimated \
+  --retry-errors /path/to/fetchanimated-full-library.log \
+  --limit 20
+```
+
+If a retry report is enabled, you can later feed that report back into `--retry-errors` to retry only the technical errors that still remain.
+
 ## Persistent batch reports
 
-Reports after `--limit` and `--full-library` runs are optional. To enable them, set an actual file path in `config.yaml`:
+Reports after `--limit`, `--full-library`, and `--retry-errors` runs are optional. To enable them, set actual file paths in `config.yaml`:
 
 ```yaml
 fetchanimated:
   full_library_log: /path/to/fetchanimated-full-library.log
   limit_log: /path/to/fetchanimated-limit.log
+  retry_errors_log: /path/to/fetchanimated-retry-errors.log
 ```
 
 Leaving either value empty disables that report.
@@ -441,7 +463,7 @@ The report contains the run summary, including:
 
 It also lists the affected album names for not-found, partial, and error cases, which is useful when you want to retry individual albums manually after temporary API problems.
 
-`full_library_log` is written for `--full-library` runs. `limit_log` is written for explicit `--limit` runs.
+`full_library_log` is written for `--full-library` runs. `limit_log` is written for explicit `--limit` runs. `retry_errors_log` is written for `--retry-errors` runs and also records any logged labels that could not be matched uniquely to the current Beets library.
 
 ## Existing artwork files
 
@@ -494,7 +516,7 @@ beet -vv fetchanimated --dry-run album:"Hybrid Theory" albumartist:"Linkin Park"
 | `no Apple Motion Artwork found` | No animated artwork was returned for that album. A normal API `404` is treated as “not found,” not as a fatal error. |
 | `requested Apple Motion Artwork variant unavailable` | The album was found, but the requested square/tall variant could not be obtained. That shape or stream may not exist. |
 | `square variant unavailable` / `tall variant unavailable` | During a dry run, that specific artwork shape could not be resolved. Other enabled variants may still work. |
-| `artwork API error; album skipped` | The external artwork API returned an error or could not be reached. Retry later. |
+| `artwork API error; album skipped` | The external artwork API returned an error or could not be reached. Retry later, or use `--retry-errors` with a saved batch report. |
 | `artwork API HTTP 429 ...` | The service is rate-limiting requests. Wait and retry later. |
 | `could not read HLS manifest ... HTTP Error 404` | The returned Apple HLS URL is no longer available at that location or is temporarily unavailable. Retry later. |
 | `ffmpeg not found ...` | FFmpeg is not available where beets runs. Install it in the same host/container or configure the correct `ffmpeg:` path. |
@@ -513,6 +535,8 @@ api_url: https://artwork.m8tec.top
 ```
 
 The resolver is an external service and is not operated by this project. Availability and behavior can therefore change independently of fetchanimated.
+
+fetchanimated deliberately leaves normal album resolution to m8tec. The only extra title veto is a narrow safety guard for an otherwise identical album title with a different or missing standalone numeric suffix at the very end, for example `Gangsta Art` vs `Gangsta Art 2`. It is not a general fuzzy/exact matcher: names such as `DS4EVER`, `DRIP SEASON 4EVER`, `LONG.LIVE.A$AP`, and edition suffixes are not rejected by this guard merely because their spelling differs.
 
 ## What fetchanimated does not change
 

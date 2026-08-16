@@ -143,3 +143,46 @@ def test_invalid_output_filename_falls_back_to_safe_default() -> None:
     instance = plugin()
     instance.config["square_webp_filename"].set("../private/cover.webp")
     assert instance.square_webp_filename == "cover.webp"
+
+
+def test_numeric_suffix_guard_is_narrow() -> None:
+    conflict = FetchAnimatedPlugin._numeric_suffix_conflict
+    assert conflict("Gangsta Art", "Gangsta Art 2") is True
+    assert conflict("Gangsta Art 2", "Gangsta Art") is True
+    assert conflict("Gangsta Art 2", "Gangsta Art 3") is True
+
+    assert conflict("DS4EVER", "DRIP SEASON 4EVER") is False
+    assert conflict("LONG.LIVE.A$AP", "LONG LIVE A$AP") is False
+    assert conflict("Gangsta Art 2", "Gangsta Art 2 Deluxe") is False
+    assert conflict("Gangsta Art", "Gangsta Art Deluxe") is False
+
+
+def test_retry_parser_uses_only_latest_eligible_report(tmp_path: Path) -> None:
+    report = tmp_path / "fetchanimated.log"
+    report.write_text(
+        "\n".join(
+            [
+                "fetchanimated v0.1.1 full-library report",
+                "ERRORS (1)",
+                "- Old Artist - Old Album -- old timeout",
+                "",
+                "fetchanimated v0.1.2 retry-errors report",
+                "ERRORS (2)",
+                "- Artist One - Album One -- HTTP 504",
+                "- Artist-Two - Album - With - Hyphens -- read timeout",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    instance = plugin()
+    assert instance._load_retry_error_labels(str(report)) == [
+        "Artist One - Album One",
+        "Artist-Two - Album - With - Hyphens",
+    ]
+
+
+def test_retry_report_is_disabled_by_default() -> None:
+    instance = plugin()
+    assert instance.config["retry_errors_log"].get(str) == ""

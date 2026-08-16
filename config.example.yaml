@@ -80,6 +80,8 @@ fetchanimated:
   full_library_log: ""
   # Example: ~/.config/beets/fetchanimated-limit.log
   limit_log: ""
+  # Example: ~/.config/beets/fetchanimated-retry-errors.log
+  retry_errors_log: ""
 
   # Prevent fetchart's filesystem source from treating the configured animated
   # WebP sidecars as static album-cover candidates.
