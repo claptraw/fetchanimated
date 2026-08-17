@@ -9,6 +9,8 @@ from beetsplug.fetchanimated import (
     PLUGIN_VERSION,
     FetchAnimatedPlugin,
     HlsVariant,
+    NumericSuffixMismatch,
+    ResolverResult,
 )
 
 
@@ -155,6 +157,115 @@ def test_numeric_suffix_guard_is_narrow() -> None:
     assert conflict("LONG.LIVE.A$AP", "LONG LIVE A$AP") is False
     assert conflict("Gangsta Art 2", "Gangsta Art 2 Deluxe") is False
     assert conflict("Gangsta Art", "Gangsta Art Deluxe") is False
+
+
+class _FakeItem:
+    def __init__(self, tracktotal: int = 0) -> None:
+        self.tracktotal = tracktotal
+        self.title = "Example Track"
+        self.artist = "Example Artist"
+
+
+class _FakeAlbum:
+    def __init__(
+        self,
+        album: str,
+        albumartist: str,
+        *,
+        year: int = 0,
+        tracktotal: int = 0,
+    ) -> None:
+        self.album = album
+        self.albumartist = albumartist
+        self.year = year
+        self._items = [_FakeItem(tracktotal)]
+
+    def items(self):
+        return iter(self._items)
+
+
+def test_numeric_suffix_fallback_selects_requested_numbered_album() -> None:
+    instance = plugin()
+    album = _FakeAlbum("Example Album 2", "Example Artist", year=2026, tracktotal=12)
+    results = [
+        {
+            "collectionId": 1,
+            "collectionName": "Example Album",
+            "artistName": "Example Artist",
+            "trackCount": 12,
+            "releaseDate": "2026-01-01T00:00:00Z",
+        },
+        {
+            "collectionId": 2,
+            "collectionName": "Example Album 2",
+            "artistName": "Example Artist & Friends",
+            "trackCount": 12,
+            "releaseDate": "2026-01-01T00:00:00Z",
+        },
+        {
+            "collectionId": 3,
+            "collectionName": "Example Album 3",
+            "artistName": "Example Artist",
+            "trackCount": 12,
+            "releaseDate": "2026-01-01T00:00:00Z",
+        },
+    ]
+    selected = instance._select_exact_itunes_candidate(
+        album, "Example Artist", "Example Album 2", results
+    )
+    assert selected is not None
+    assert selected["collectionId"] == 2
+
+
+def test_numeric_suffix_fallback_uses_tracktotal_to_avoid_guessing() -> None:
+    instance = plugin()
+    album = _FakeAlbum("Example Album 2", "Example Artist", tracktotal=18)
+    results = [
+        {
+            "collectionId": 18,
+            "collectionName": "Example Album 2",
+            "artistName": "Example Artist",
+            "trackCount": 18,
+        },
+        {
+            "collectionId": 21,
+            "collectionName": "Example Album 2",
+            "artistName": "Example Artist",
+            "trackCount": 21,
+        },
+    ]
+    selected = instance._select_exact_itunes_candidate(
+        album, "Example Artist", "Example Album 2", results
+    )
+    assert selected is not None
+    assert selected["collectionId"] == 18
+
+
+def test_resolve_album_recovers_after_numeric_suffix_mismatch(monkeypatch) -> None:
+    instance = plugin()
+    album = _FakeAlbum("Example Album 2", "Example Artist")
+    expected = ResolverResult(
+        square_url="https://example.test/square.m3u8",
+        tall_url=None,
+        api_artist="Example Artist",
+        api_album="Example Album 2",
+    )
+
+    def mismatched_search(*args, **kwargs):
+        raise NumericSuffixMismatch("Example Artist", "Example Album")
+
+    called = {}
+
+    def exact_fallback(album_arg, artist_arg, album_name_arg):
+        called["value"] = (album_arg, artist_arg, album_name_arg)
+        return expected
+
+    monkeypatch.setattr(instance, "_api_search", mismatched_search)
+    monkeypatch.setattr(instance, "_resolve_numeric_suffix_exact", exact_fallback)
+
+    result = instance._resolve_album(album)
+    assert result == expected
+    assert called["value"] == (album, "Example Artist", "Example Album 2")
 
 
 def test_retry_parser_uses_only_latest_eligible_report(tmp_path: Path) -> None:

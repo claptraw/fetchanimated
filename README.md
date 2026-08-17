@@ -534,7 +534,7 @@ api_url: https://artwork.m8tec.top
 
 The resolver is an external service and is not operated by this project. Availability and behavior can therefore change independently of fetchanimated.
 
-fetchanimated deliberately leaves normal album resolution to m8tec. The only extra title veto is a narrow safety guard for an otherwise identical album title with a different or missing standalone numeric suffix at the very end, for example `Gangsta Art` vs `Gangsta Art 2`. It is not a general fuzzy/exact matcher: names such as `DS4EVER`, `DRIP SEASON 4EVER`, `LONG.LIVE.A$AP`, and edition suffixes are not rejected by this guard merely because their spelling differs.
+fetchanimated deliberately leaves normal album resolution to m8tec. For clear numbered-title collisions where m8tec resolves an otherwise identical neighbouring album with a different or missing standalone numeric suffix at the very end, for example `Gangsta Art` vs `Gangsta Art 2`, fetchanimated can recover the specifically requested numbered release instead of using the wrong artwork. This improves on m8tec's default search behavior for that narrow class of matches. It is not a general fuzzy/exact matcher: names such as `DS4EVER`, `DRIP SEASON 4EVER`, `LONG.LIVE.A$AP`, and edition suffixes are not rejected merely because their spelling differs.
 
 ## What fetchanimated does not change
 

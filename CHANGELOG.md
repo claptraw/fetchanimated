@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## 0.2 - 2026-08-17
+
+### Fixed
+
+- Improved handling of numbered album titles such as `Album`, `Album 2`, and `Album 3`: when m8tec resolves the request to the wrong neighbouring numbered album, fetchanimated now retrieves the artwork for the specifically requested album instead.
+- This is a targeted improvement over m8tec's default search behavior for these clear numbered-title collisions; unrelated spelling variants and normal edition suffixes keep their existing behavior.
+
 ## 0.1.2 - 2026-08-16
 
 ### Added

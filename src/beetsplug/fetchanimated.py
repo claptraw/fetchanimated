@@ -1,6 +1,6 @@
 """Fetch Apple Music animated album artwork for beets.
 
-fetchanimated v0.1.2 is a standalone beets plugin intentionally isolated from static album artwork:
+fetchanimated v0.2 is a standalone beets plugin intentionally isolated from static album artwork:
 
 * It never requires or modifies ``cover.jpg``, ``album.artpath`` or embedded
   artwork.
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from beets.library import Album, Library
 
 
-PLUGIN_VERSION = "0.1.2"
+PLUGIN_VERSION = "0.2"
 
 
 @dataclass(frozen=True)
@@ -116,6 +116,15 @@ class ArtworkApiUnavailable(RuntimeError):
     This is deliberately distinct from a normal 404/no-artwork result so one
     broken request aborts only the current album's fallback attempts.
     """
+
+
+class NumericSuffixMismatch(RuntimeError):
+    """m8tec returned a numbered neighbouring album instead of the request."""
+
+    def __init__(self, api_artist: str | None, api_album: str) -> None:
+        super().__init__(api_album)
+        self.api_artist = api_artist
+        self.api_album = api_album
 
 
 class FetchAnimatedPlugin(plugins.BeetsPlugin):
@@ -467,6 +476,257 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
             )
         return False
 
+    @classmethod
+    def _artist_name_compatible(cls, requested: str, returned: str) -> bool:
+        """Conservative artist containment for the exact-title fallback only."""
+        requested_key = "".join(cls._title_tokens(requested))
+        returned_key = "".join(cls._title_tokens(returned))
+        if not requested_key or not returned_key:
+            return True
+        return requested_key in returned_key or returned_key in requested_key
+
+    @staticmethod
+    def _album_year(album: Album) -> int:
+        try:
+            return int(getattr(album, "year", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _album_tracktotals(album: Album) -> set[int]:
+        totals: set[int] = set()
+        try:
+            for item in album.items():
+                try:
+                    total = int(getattr(item, "tracktotal", 0) or 0)
+                except (TypeError, ValueError):
+                    total = 0
+                if total > 0:
+                    totals.add(total)
+        except Exception:
+            pass
+        return totals
+
+    def _select_exact_itunes_candidate(
+        self,
+        album: Album,
+        requested_artist: str,
+        requested_album: str,
+        results: list[Any],
+    ) -> dict[str, Any] | None:
+        """Select one exact-title Apple catalog album after a numeric collision.
+
+        This is not a general resolver. It is reached only after m8tec returned
+        a proven numeric-suffix neighbour. The album title must match exactly
+        after punctuation/case normalization. If Apple exposes multiple exact
+        editions, Beets tracktotal and year are used only as tie-breakers; any
+        remaining ambiguity is left unresolved instead of guessed.
+        """
+        requested_tokens = self._title_tokens(requested_album)
+        candidates: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        for raw in results:
+            if not isinstance(raw, dict):
+                continue
+            candidate_title = self._text(raw.get("collectionName"))
+            candidate_artist = self._text(raw.get("artistName"))
+            collection_id = self._text(raw.get("collectionId"))
+            if not candidate_title or not collection_id:
+                continue
+            if self._title_tokens(candidate_title) != requested_tokens:
+                continue
+            if candidate_artist and not self._artist_name_compatible(
+                requested_artist, candidate_artist
+            ):
+                continue
+            if collection_id in seen_ids:
+                continue
+            seen_ids.add(collection_id)
+            candidates.append(raw)
+
+        if not candidates:
+            return None
+
+        totals = self._album_tracktotals(album)
+        if totals:
+            matching_total: list[dict[str, Any]] = []
+            for candidate in candidates:
+                try:
+                    count = int(candidate.get("trackCount") or 0)
+                except (TypeError, ValueError):
+                    count = 0
+                if count in totals:
+                    matching_total.append(candidate)
+            if matching_total:
+                candidates = matching_total
+
+        year = self._album_year(album)
+        if year:
+            matching_year: list[dict[str, Any]] = []
+            for candidate in candidates:
+                release_date = self._text(candidate.get("releaseDate"))
+                try:
+                    candidate_year = (
+                        int(release_date[:4]) if len(release_date) >= 4 else 0
+                    )
+                except ValueError:
+                    candidate_year = 0
+                if candidate_year == year:
+                    matching_year.append(candidate)
+            if matching_year:
+                candidates = matching_year
+
+        if len(candidates) != 1:
+            self._log.warning(
+                "fetchanimated: exact Apple catalog fallback for {} - {} is "
+                "ambiguous ({} matching editions); not guessing",
+                requested_artist,
+                requested_album,
+                len(candidates),
+            )
+            return None
+        return candidates[0]
+
+    def _api_search_by_apple_url(
+        self,
+        apple_music_url: str,
+        requested_artist: str,
+        requested_album: str,
+    ) -> ResolverResult | None:
+        base = self.config["api_url"].get(str).strip().rstrip("/")
+        url = (
+            f"{base}/api/v1/artwork/url?"
+            f"{urllib.parse.urlencode({'url': apple_music_url})}"
+        )
+        timeout = max(1, self.config["api_timeout"].get(int))
+        self._wait_before_api_request()
+        try:
+            payload = self._request_json(url, timeout)
+        except urllib.error.HTTPError as exc:
+            raise ArtworkApiUnavailable(
+                f"artwork API HTTP {exc.code} for exact Apple URL {apple_music_url}"
+            ) from exc
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise ArtworkApiUnavailable(
+                f"artwork API unavailable for exact Apple URL {apple_music_url}: {exc}"
+            ) from exc
+
+        if payload is None:
+            return None
+
+        square_url = payload.get("url")
+        tall_url = payload.get("url_tall")
+        if not isinstance(square_url, str) or not square_url.startswith(
+            ("https://", "http://")
+        ):
+            square_url = None
+        if not isinstance(tall_url, str) or not tall_url.startswith(
+            ("https://", "http://")
+        ):
+            tall_url = None
+        if not square_url and not tall_url:
+            return None
+
+        api_artist = payload.get("artist")
+        api_album = payload.get("album")
+        api_artist = api_artist if isinstance(api_artist, str) else None
+        api_album = api_album if isinstance(api_album, str) else None
+
+        if api_album and self._title_tokens(api_album) != self._title_tokens(
+            requested_album
+        ):
+            self._log.warning(
+                "fetchanimated: exact Apple URL resolved to unexpected album {} - {} "
+                "(requested {} - {}); rejecting",
+                api_artist or "?",
+                api_album,
+                requested_artist,
+                requested_album,
+            )
+            return None
+
+        return ResolverResult(
+            square_url=square_url,
+            tall_url=tall_url,
+            api_artist=api_artist,
+            api_album=api_album,
+        )
+
+    def _resolve_numeric_suffix_exact(
+        self,
+        album: Album,
+        artist: str,
+        album_name: str,
+    ) -> ResolverResult | None:
+        """Resolve the requested numbered album after a numeric collision."""
+        params = {
+            "term": f"{artist} {album_name}",
+            "media": "music",
+            "entity": "album",
+            "limit": "25",
+        }
+        search_url = (
+            "https://itunes.apple.com/search?" + urllib.parse.urlencode(params)
+        )
+        timeout = max(1, self.config["api_timeout"].get(int))
+        self._wait_before_api_request()
+        try:
+            payload = self._request_json(search_url, timeout)
+        except urllib.error.HTTPError as exc:
+            raise ArtworkApiUnavailable(
+                f"Apple catalog fallback HTTP {exc.code} for {artist} - {album_name}"
+            ) from exc
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise ArtworkApiUnavailable(
+                f"Apple catalog fallback unavailable for {artist} - {album_name}: {exc}"
+            ) from exc
+
+        results = payload.get("results", []) if isinstance(payload, dict) else []
+        if not isinstance(results, list):
+            return None
+        candidate = self._select_exact_itunes_candidate(
+            album,
+            artist,
+            album_name,
+            results,
+        )
+        if candidate is None:
+            return None
+
+        collection_id = self._text(candidate.get("collectionId"))
+        candidate_artist = self._text(candidate.get("artistName")) or artist
+        candidate_album = self._text(candidate.get("collectionName")) or album_name
+        try:
+            track_count = int(candidate.get("trackCount") or 0)
+        except (TypeError, ValueError):
+            track_count = 0
+        self._log.info(
+            "fetchanimated: exact Apple catalog fallback selected {} - {} "
+            "(Apple album {}, {} tracks)",
+            candidate_artist,
+            candidate_album,
+            collection_id,
+            track_count or "?",
+        )
+        return self._api_search_by_apple_url(
+            f"https://music.apple.com/album/{collection_id}",
+            artist,
+            album_name,
+        )
+
     def _wait_before_api_request(self) -> None:
         """Space public API searches without delaying the first request."""
         delay = max(0.0, self.config["api_request_delay_seconds"].get(float))
@@ -554,20 +814,20 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
         api_artist = api_artist if isinstance(api_artist, str) else None
         api_album = api_album if isinstance(api_album, str) else None
 
-        # Keep m8tec as the resolver, but veto one proven cache-collision class:
-        # an otherwise identical album title with a different/missing standalone
-        # numeric suffix at the very end (e.g. "Gangsta Art" vs "Gangsta Art 2").
-        # This is intentionally not a general title matcher.
+        # Keep m8tec as the normal resolver. If it returns a proven numbered
+        # neighbouring album, recover the originally requested numbered release
+        # instead of accepting the wrong artwork. This remains intentionally
+        # narrower than a general title matcher.
         if api_album and self._numeric_suffix_conflict(album_name, api_album):
             self._log.warning(
-                "fetchanimated: rejecting numeric-suffix mismatch for {} - {} "
-                "(m8tec returned {} - {})",
+                "fetchanimated: numeric-suffix mismatch for {} - {} "
+                "(m8tec returned {} - {}); trying exact Apple catalog fallback",
                 artist,
                 album_name,
                 api_artist or "?",
                 api_album,
             )
-            return None
+            raise NumericSuffixMismatch(api_artist, api_album)
 
         # Do not apply any broader fetchanimated-specific title/artist matcher.
         # The m8tec /api/v1/artwork/search endpoint still owns normal Apple
@@ -587,7 +847,10 @@ class FetchAnimatedPlugin(plugins.BeetsPlugin):
         if not artist:
             return None
         title_hint = self._search_title_hint(album)
-        return self._api_search(artist, album_name, title_hint)
+        try:
+            return self._api_search(artist, album_name, title_hint)
+        except NumericSuffixMismatch:
+            return self._resolve_numeric_suffix_exact(album, artist, album_name)
 
     # ------------------------------------------------------------------
     # HLS resolution discovery and automatic variant selection
